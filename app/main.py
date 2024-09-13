@@ -29,17 +29,17 @@ models.Base.metadata.create_all(bind=engine)
 
 app = FastAPI()
 
-# Register user
+# Register user-
 @app.post("/register", response_model=schemas.User, status_code=status.HTTP_201_CREATED)
 def register_user(user: schemas.UserCreate, db: Session = Depends(get_db)):
-    db_user = crud.get_user_by_email( email=user.email, db=db)
+    # Check if the user already exists
+    db_user = crud.get_user_by_email(email=user.email, db=db)
     if db_user:
         logger.warning(f"Registration attempt with already registered email: {user.email}")
         raise HTTPException(status_code=400, detail="Email already registered")
     
-    hashed_password = utils.get_password_hash(user.password)
-    user.password = hashed_password
-    new_user = crud.create_user(db=db, user=user)
+    # Create the new user
+    new_user = crud.create_user(user=user, db=db)
     
     logger.info(f"New user registered: {user.email}")
     return new_user
@@ -47,15 +47,21 @@ def register_user(user: schemas.UserCreate, db: Session = Depends(get_db)):
 # User Login
 @app.post("/login/")
 def login(user_credentials: schemas.UserLogin, db: Session = Depends(get_db)):
+    logger.info(f"Login attempt for email: {user_credentials.email}")
+    
     db_user = crud.get_user_by_email(email=user_credentials.email, db=db)
     if not db_user:
         logger.warning(f"Login attempt with invalid email: {user_credentials.email}")
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid credentials")
-
+    
+    logger.info(f"User found: {db_user.email}")
+    
     if not utils.verify_password(user_credentials.password, db_user.hashed_password):
-        logger.warning(f"Login attempt with invalid password for email: {user_credentials.email}")
+        logger.warning(f"Invalid password for email: {user_credentials.email}")
+        logger.info(f"Stored hashed password: {db_user.hashed_password}")
+        logger.info(f"Provided password: {user_credentials.password}")
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid credentials")
-
+    
     access_token = create_access_token(data={"sub": db_user.email})
     logger.info(f"User logged in: {user_credentials.email}")
     return {"access_token": access_token, "token_type": "bearer"}
@@ -64,11 +70,19 @@ def login(user_credentials: schemas.UserLogin, db: Session = Depends(get_db)):
 # Search for books via Google Books API (public route, no authentication required)
 @app.get("/search_books/")
 def search_books(book_name: str, author_name: str):
-    response = requests.get(f"https://www.googleapis.com/books/v1/volumes?q={book_name}+inauthor:{author_name}&key={API_KEY}")
-    logger.info(f"Book search performed: {book_name} by {author_name}")
-    return response.json()
-
+    try:
+        response = requests.get(f"https://www.googleapis.com/books/v1/volumes?q={book_name}+inauthor:{author_name}&key={API_KEY}")
+        response.raise_for_status()  # Raise an error for bad responses
+        logger.info(f"Book search performed: {book_name} by {author_name}, Status Code: {response.status_code}")
+        return response.json()
+    except requests.exceptions.HTTPError as http_err:
+        logger.error(f"HTTP error occurred: {http_err}")
+        raise HTTPException(status_code=500, detail="HTTP error occurred")
+    except Exception as err:
+        logger.error(f"Other error occurred: {err}")
+        raise HTTPException(status_code=500, detail="An error occurred")
 # Save a book to user's profile (requires authentication)
+
 @app.post("/users/{user_id}/books/")
 def save_book(
     user_id: int, 

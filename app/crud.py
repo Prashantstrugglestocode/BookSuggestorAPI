@@ -30,7 +30,6 @@ def create_user(user: schemas.UserCreate, db: Session) -> models.User:
     db.add(db_user)
     db.commit()
     db.refresh(db_user)
-    logger.info(f"New user created: {user.email}")
     return db_user
 
 def add_book_to_user(user: models.User, book: schemas.Book, db: Session) -> models.Book:
